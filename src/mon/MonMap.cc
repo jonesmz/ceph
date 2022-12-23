@@ -909,7 +909,7 @@ int MonMap::init_with_dns_srv(CephContext* cct,
   }
 
   map<string, DNSResolver::Record> records;
-  if (DNSResolver::get_instance()->resolve_srv_hosts(cct, srv_name,
+  if (DNSResolver::get_instance()->resolve_srv_and_ptr_hosts(cct, srv_name,
         DNSResolver::SRV_Protocol::TCP, domain, &records) != 0) {
 
     errout << "unable to get monitor info from DNS SRV with service name: "

@@ -128,7 +128,14 @@ class DNSResolver {
         const SRV_Protocol trans_protocol, const std::string& domain,
         std::map<std::string, Record> *srv_hosts);
 
+    int resolve_srv_and_ptr_hosts(CephContext *cct, const std::string& service_name,
+        const SRV_Protocol trans_protocol, std::map<std::string, Record> *srv_hosts);
+    int resolve_srv_and_ptr_hosts(CephContext *cct, const std::string& service_name,
+        const SRV_Protocol trans_protocol, const std::string& domain,
+        std::map<std::string, Record> *srv_hosts);
+
   private:
+
     DNSResolver() { resolv_h = new ResolvHWrapper(); }
     ~DNSResolver();
 

@@ -262,7 +262,7 @@ int DNSResolver::resolve_ip_addr(CephContext *cct, res_state *res, const string&
   return 0;
 }
 
-int DNSResolver::resolve_srv_hosts(CephContext *cct, const string& service_name, 
+int DNSResolver::resolve_srv_hosts(CephContext *cct, const string& service_name,
     const SRV_Protocol trans_protocol,
     map<string, DNSResolver::Record> *srv_hosts) {
   return this->resolve_srv_hosts(cct, service_name, trans_protocol, "", srv_hosts);
@@ -282,7 +282,6 @@ int DNSResolver::resolve_srv_hosts(CephContext *cct, const string& service_name,
       this->put_state(res);
     });
 #endif
-
   u_char nsbuf[NS_PACKETSZ];
   int num_hosts;
 
@@ -367,6 +366,85 @@ int DNSResolver::resolve_srv_hosts(CephContext *cct, const string& service_name,
     }
   }
   return 0;
+}
+
+int DNSResolver::resolve_srv_and_ptr_hosts(CephContext *cct, const string& service_name,
+    const SRV_Protocol trans_protocol,
+    map<string, DNSResolver::Record> *srv_hosts) {
+  return this->resolve_srv_and_ptr_hosts(cct, service_name, trans_protocol, "", srv_hosts);
+}
+
+int DNSResolver::resolve_srv_and_ptr_hosts(CephContext *cct, const string& service_name,
+    const SRV_Protocol trans_protocol, const string& domain,
+    map<string, DNSResolver::Record> *srv_hosts) {
+
+#ifdef HAVE_RES_NQUERY
+  res_state res;
+  int r = get_state(cct, &res);
+  if (r < 0) {
+    return r;
+  }
+  auto put_state = make_scope_guard([res, this] {
+      this->put_state(res);
+    });
+#endif
+  u_char nsbuf[NS_PACKETSZ];
+
+  string proto_str = srv_protocol_to_str(trans_protocol);
+  string query_str = "_"+service_name+"._"+proto_str+(domain.empty() ? ".local"
+      : "."+domain);
+  int len;
+
+#ifdef HAVE_RES_NQUERY
+  len = resolv_h->res_nsearch(res, query_str.c_str(), ns_c_in, ns_t_srv, nsbuf,
+      sizeof(nsbuf));
+#else
+  {
+# ifndef HAVE_THREAD_SAFE_RES_QUERY
+    std::lock_guard l(lock);
+# endif
+    len = resolv_h->res_search(query_str.c_str(), ns_c_in, ns_t_ptr, nsbuf,
+        sizeof(nsbuf));
+  }
+#endif
+  if (len < 0) {
+    lderr(cct) << "dns ptr query failed for service " << query_str << dendl;
+    return this->resolve_srv_hosts(cct, service_name, trans_protocol, domain, srv_hosts);
+  }
+  else if (len == 0) {
+    ldout(cct, 20) << "No ptr records found for service " << query_str << dendl;
+    return this->resolve_srv_hosts(cct, service_name, trans_protocol, domain, srv_hosts);
+  }
+
+  ns_msg handle;
+
+  ns_initparse(nsbuf, len, &handle);
+
+  int num_records = ns_msg_count (handle, ns_s_an);
+  if (num_records == 0) {
+    ldout(cct, 20) << "No ptr records found for service " << query_str << dendl;
+    return this->resolve_srv_hosts(cct, service_name, trans_protocol, domain, srv_hosts);
+  }
+
+  ns_rr rr;
+  for (int i = 0; i < num_records; i++) {
+    int r;
+    if ((r = ns_parserr(&handle, ns_s_an, i, &rr)) < 0) {
+      lderr(cct) << "Error while parsing DNS ptr record" << dendl;
+      continue;
+    }
+
+    string full_srv_name = ns_rr_name(rr);
+    string protocol = "_" + proto_str;
+    string sub_srv_name = full_srv_name.substr(0, full_srv_name.find(protocol));
+    string srv_domain = full_srv_name.substr(full_srv_name.find(protocol)
+        + protocol.length());
+
+    this->resolve_srv_hosts(cct, sub_srv_name, trans_protocol, srv_domain, srv_hosts);
+  }
+
+  // Now look up any hosts from the srvrecord itself.
+  return this->resolve_srv_hosts(cct, service_name, trans_protocol, domain, srv_hosts);
 }
 
 }

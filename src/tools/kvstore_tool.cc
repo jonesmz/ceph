@@ -11,6 +11,7 @@
 #include "include/buffer.h"
 #include "kv/KeyValueDB.h"
 #include "kv/KeyValueHistogram.h"
+#include "global/global_context.h"
 
 using namespace std;
 
